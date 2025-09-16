@@ -68,7 +68,7 @@ def multiple_args_to_zipped_struct_field_access(_, **kwargs):
 def exclude_unsupported_window_frame_from_ops_snowflake(_, **kwargs):
     """Snowflake-specific window frame exclusion that allows RANGE BETWEEN INTERVAL for supported functions."""
     # Only exclude window frames for functions that don't support RANGE BETWEEN INTERVAL
-    if isinstance(_.func, (ops.Count, ops.CountStar, ops.Sum, ops.Min, ops.Max, ops.Mean)):
+    if isinstance(_.func, (ops.Count, ops.CountStar, ops.Sum, ops.Min, ops.Max, ops.Mean, ops.Variance)):
         # These functions support RANGE BETWEEN INTERVAL in Snowflake, so keep the frame
         return _
     # For other functions, exclude the window frame
@@ -697,11 +697,11 @@ $$""",
             # to make the default frame unbounded preceding to current row
             spec.args["kind"] = "ROWS"
         elif (
-            isinstance(func, (ops.Count, ops.CountStar, ops.Sum, ops.Min, ops.Max, ops.Mean))
+            isinstance(func, (ops.Count, ops.CountStar, ops.Sum, ops.Min, ops.Max, ops.Mean, ops.Variance))
             and spec.args.get("kind") == "RANGE"
             and op.how == "range"
         ):
-            # Snowflake now supports RANGE BETWEEN INTERVAL for COUNT, SUM, MIN, MAX, AVG
+            # Snowflake now supports RANGE BETWEEN INTERVAL for COUNT, SUM, MIN, MAX, AVG, VAR
             # Keep the RANGE specification for these functions
             pass
         return spec

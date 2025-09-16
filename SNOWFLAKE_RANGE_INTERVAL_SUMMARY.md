@@ -84,6 +84,7 @@ The following functions now support `RANGE BETWEEN INTERVAL` syntax in Snowflake
 - ✅ `MIN(column)` 
 - ✅ `MAX(column)`
 - ✅ `AVG(column)`
+- ✅ `VAR(column)` *(variance)*
 
 Functions that still use `ROWS` frames:
 - ❌ `LAG()` / `LEAD()`
