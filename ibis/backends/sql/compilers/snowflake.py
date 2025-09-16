@@ -27,7 +27,6 @@ from ibis.backends.sql.dialects import Snowflake
 from ibis.backends.sql.rewrites import (
     FirstValue,
     LastValue,
-    exclude_unsupported_window_frame_from_ops,
     exclude_unsupported_window_frame_from_row_number,
     lower_log2,
     lower_log10,
@@ -61,6 +60,21 @@ def multiple_args_to_zipped_struct_field_access(_, **kwargs):
     return _.copy(body=_.body.replace(argument_replacer | index_replacer))
 
 
+@replace(
+    p.WindowFunction(
+        p.Lag | p.Lead | p.PercentRank | p.CumeDist | p.Any | p.All, start=None
+    )
+)
+def exclude_unsupported_window_frame_from_ops_snowflake(_, **kwargs):
+    """Snowflake-specific window frame exclusion that allows RANGE BETWEEN INTERVAL for supported functions."""
+    # Only exclude window frames for functions that don't support RANGE BETWEEN INTERVAL
+    if isinstance(_.func, (ops.Count, ops.CountStar, ops.Sum, ops.Min, ops.Max, ops.Mean, ops.Variance)):
+        # These functions support RANGE BETWEEN INTERVAL in Snowflake, so keep the frame
+        return _
+    # For other functions, exclude the window frame
+    return _.copy(start=None, end=0, order_by=_.order_by or (ops.NULL,))
+
+
 class SnowflakeFuncGen(FuncGen):
     __slots__ = ()
 
@@ -84,7 +98,7 @@ class SnowflakeCompiler(SQLGlotCompiler):
 
     rewrites = (
         exclude_unsupported_window_frame_from_row_number,
-        exclude_unsupported_window_frame_from_ops,
+        exclude_unsupported_window_frame_from_ops_snowflake,
         rewrite_empty_order_by_window,
         multiple_args_to_zipped_struct_field_access,
         *SQLGlotCompiler.rewrites,
@@ -682,6 +696,13 @@ $$""",
             # we need to make the default window rows (since range isn't supported) and we need
             # to make the default frame unbounded preceding to current row
             spec.args["kind"] = "ROWS"
+        elif (
+            isinstance(func, (ops.Count, ops.CountStar, ops.Sum, ops.Min, ops.Max, ops.Mean, ops.Variance))
+            and op.how == "range"
+        ):
+            # Snowflake now supports RANGE BETWEEN INTERVAL for COUNT, SUM, MIN, MAX, AVG, VAR
+            # Keep the RANGE specification for these functions (whether explicit or auto-determined)
+            pass
         return spec
 
     def visit_WindowBoundary(self, op, *, value, preceding):
@@ -689,6 +710,21 @@ $$""",
             raise com.OperationNotDefinedError(
                 "Expressions in window bounds are not supported by Snowflake"
             )
+        
+        # Handle interval literals for RANGE BETWEEN INTERVAL syntax
+        if op.value.dtype.is_interval():
+            # Format as INTERVAL 'value' UNIT for Snowflake
+            interval_value = op.value.value
+            unit = op.value.dtype.unit.name.upper()
+            
+            # Snowflake expects INTERVAL 'N' UNIT format
+            interval_expr = sge.Interval(
+                this=sge.convert(str(abs(interval_value))),
+                unit=sge.Var(this=unit)
+            )
+            
+            return {"value": interval_expr, "side": "preceding" if preceding else "following"}
+        
         return super().visit_WindowBoundary(op, value=value, preceding=preceding)
 
     def visit_Correlation(self, op, *, left, right, how, where):
