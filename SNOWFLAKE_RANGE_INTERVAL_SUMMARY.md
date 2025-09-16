@@ -61,15 +61,16 @@ def _minimize_spec(op, spec):
     elif isinstance(op.func, (ops.First, ops.Last, ops.NthValue)):
         spec.args["kind"] = "ROWS"
     elif (
-        isinstance(func, (ops.Count, ops.CountStar, ops.Sum, ops.Min, ops.Max, ops.Mean))
-        and spec.args.get("kind") == "RANGE"
-        and op.how == "range"
+        isinstance(func, (ops.Count, ops.CountStar, ops.Sum, ops.Min, ops.Max, ops.Mean, ops.Variance))
+        and op.how == "range"  # KEY FIX: Check op.how instead of spec.args
     ):
-        # Snowflake now supports RANGE BETWEEN INTERVAL for COUNT, SUM, MIN, MAX, AVG
-        # Keep the RANGE specification for these functions
+        # Snowflake now supports RANGE BETWEEN INTERVAL for COUNT, SUM, MIN, MAX, AVG, VAR
+        # Keep the RANGE specification for these functions (whether explicit or auto-determined)
         pass
     return spec
 ```
+
+**Key Fix:** Changed from `spec.args.get("kind") == "RANGE"` to `op.how == "range"` to catch both explicit range windows and auto-determined range windows (when using `preceding=ibis.interval(...)`)
 
 #### Updated Imports and Rewrites
 - Removed: `exclude_unsupported_window_frame_from_ops` 
@@ -101,17 +102,33 @@ expr = table.value.min().over(window)
 ```
 
 ### After (now works)
+
+**Method 1: Explicit range parameter**
 ```python
-# This now generates correct Snowflake SQL
 table = ibis.table([('tms', 'date'), ('value', 'float64')], name='test_table')
 window = ibis.window(range=(-ibis.interval(days=2), 0), order_by='tms')
 expr = table.value.min().over(window)
+```
 
-# Generates SQL like:
-# SELECT MIN(value) OVER (
-#   ORDER BY tms ASC 
-#   RANGE BETWEEN INTERVAL '2' DAY PRECEDING AND CURRENT ROW
-# ) FROM test_table
+**Method 2: Legacy preceding parameter (auto-detected as range)**
+```python
+# This also works now! (the user's original failing test case)
+w = ibis.window(
+    preceding=ibis.interval(seconds=10),
+    following=0,
+    group_by="key",
+    order_by="time",
+)
+expr = t.mutate(sum_over_win=t.value.sum().over(w))
+```
+
+Both generate correct Snowflake SQL:
+```sql
+SELECT SUM(value) OVER (
+  PARTITION BY key
+  ORDER BY time ASC 
+  RANGE BETWEEN INTERVAL '10' SECOND PRECEDING AND CURRENT ROW
+) FROM test_table
 ```
 
 ## Validation

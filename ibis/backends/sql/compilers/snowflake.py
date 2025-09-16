@@ -698,11 +698,10 @@ $$""",
             spec.args["kind"] = "ROWS"
         elif (
             isinstance(func, (ops.Count, ops.CountStar, ops.Sum, ops.Min, ops.Max, ops.Mean, ops.Variance))
-            and spec.args.get("kind") == "RANGE"
             and op.how == "range"
         ):
             # Snowflake now supports RANGE BETWEEN INTERVAL for COUNT, SUM, MIN, MAX, AVG, VAR
-            # Keep the RANGE specification for these functions
+            # Keep the RANGE specification for these functions (whether explicit or auto-determined)
             pass
         return spec
 
